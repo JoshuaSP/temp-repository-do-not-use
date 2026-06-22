@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Life Landscape — an authoring tool for ridges and valleys</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #171c24;
+    --panel-2: #1f2630;
+    --ink: #e7ecf3;
+    --ink-dim: #9aa6b6;
+    --line: #2b3543;
+    --accent: #7aa2ff;
+    --accent-2: #ffd479;
+    --danger: #ff7a7a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  #canvas-wrap { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  /* ---- Floating labels (CSS2D) ---- */
+  .label {
+    color: var(--ink);
+    background: rgba(14,17,22,0.72);
+    border: 1px solid var(--line);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    transform: translate(-50%, -120%);
+    backdrop-filter: blur(2px);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .label.path-label { border-color: var(--accent); }
+
+  /* ---- Side panel ---- */
+  #panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 320px;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    box-shadow: -8px 0 24px rgba(0,0,0,0.35);
+    z-index: 10;
+  }
+  #panel header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  #panel header h1 { margin: 0; font-size: 15px; letter-spacing: .2px; }
+  #panel header p { margin: 4px 0 0; color: var(--ink-dim); font-size: 11px; }
+  .scroll { overflow-y: auto; padding: 12px 14px 24px; flex: 1; }
+
+  .section { margin-bottom: 16px; }
+  .section > .section-title {
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-size: 10px;
+    color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+
+  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button.tool {
+    background: var(--panel-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .12s, background .12s;
+  }
+  button.tool:hover { border-color: var(--accent); }
+  button.tool.active { border-color: var(--accent); background: #243049; }
+  button.tool .t-title { display: block; font-weight: 600; }
+  button.tool .t-sub { display: block; color: var(--ink-dim); font-size: 10px; }
+
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .row label { width: 92px; color: var(--ink-dim); flex: none; }
+  .row input[type=range] { flex: 1; }
+  .row input[type=text], .row input[type=number] {
+    flex: 1; background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+  }
+  .row .val { width: 44px; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=color] { width: 36px; height: 26px; border: 1px solid var(--line); background: none; border-radius: 6px; padding: 0; }
+
+  .btn {
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 10px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: #25406e; border-color: var(--accent); }
+  .btn.danger { color: var(--danger); }
+  .btn.danger:hover { border-color: var(--danger); }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .list { display: flex; flex-direction: column; gap: 4px; }
+  .item {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 8px; cursor: pointer;
+  }
+  .item.selected { border-color: var(--accent); background: #233049; }
+  .item .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .kind { color: var(--ink-dim); font-size: 10px; }
+  .muted { color: var(--ink-dim); font-size: 11px; }
+
+  /* ---- Hint bar ---- */
+  #hint {
+    position: absolute; left: 16px; bottom: 16px;
+    background: rgba(14,17,22,0.8);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 8px 12px; border-radius: 8px;
+    max-width: 460px; z-index: 10;
+    backdrop-filter: blur(3px);
+  }
+  #hint b { color: var(--accent-2); }
+  .empty { color: var(--ink-dim); font-style: italic; }
+  hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="canvas-wrap"></div>
+
+  <div id="hint">Drag to orbit · scroll to zoom · right-drag to pan. Pick a tool on the right, then click the surface.</div>
+
+  <aside id="panel">
+    <header>
+      <h1>Life Landscape</h1>
+      <p>Sculpt ridges &amp; valleys · draw paths · label the terrain.</p>
+    </header>
+    <div class="scroll">
+
+      <div class="section">
+        <div class="section-title">Tools</div>
+        <div class="tools" id="tools">
+          <button class="tool active" data-tool="orbit"><span class="t-title">Orbit</span><span class="t-sub">look around / select</span></button>
+          <button class="tool" data-tool="valley"><span class="t-title">+ Valley</span><span class="t-sub">a dip / pull</span></button>
+          <button class="tool" data-tool="ridge"><span class="t-title">+ Ridge</span><span class="t-sub">a barrier / climb</span></button>
+          <button class="tool" data-tool="basin"><span class="t-title">+ Basin</span><span class="t-sub">attractor w/ rim</span></button>
+          <button class="tool" data-tool="saddle"><span class="t-title">+ Saddle</span><span class="t-sub">a pass / choice</span></button>
+          <button class="tool" data-tool="path"><span class="t-title">Draw Path</span><span class="t-sub">a trajectory</span></button>
+          <button class="tool" data-tool="marble"><span class="t-title">Drop Marble</span><span class="t-sub">let it roll</span></button>
+        </div>
+      </div>
+
+      <div class="section" id="editor-section">
+        <div class="section-title">Selection</div>
+        <div id="editor"><div class="empty">Nothing selected. Click a handle or list item, or add a feature.</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Features</div>
+        <div class="list" id="feature-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Paths</div>
+        <div class="list" id="path-list"></div>
+      </div>
+
+      <hr/>
+
+      <div class="section">
+        <div class="section-title">Display</div>
+        <div class="row"><label>Grid lines</label><input type="range" id="opt-grid" min="0" max="1" step="1" value="1"><span class="val" id="opt-grid-v">on</span></div>
+        <div class="row"><label>Wire density</label><input type="range" id="opt-density" min="16" max="64" step="4" value="40"><span class="val" id="opt-density-v">40</span></div>
+        <div class="row"><label>Vert. scale</label><input type="range" id="opt-vscale" min="0.3" max="2.5" step="0.1" value="1"><span class="val" id="opt-vscale-v">1.0</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Scene</div>
+        <div class="btn-row">
+          <button class="btn" id="btn-save">Save JSON</button>
+          <button class="btn" id="btn-load">Load JSON</button>
+          <button class="btn" id="btn-png">Export PNG</button>
+        </div>
+        <div class="btn-row" style="margin-top:6px;">
+          <button class="btn" id="btn-example">Load example</button>
+          <button class="btn danger" id="btn-clear">Clear all</button>
+        </div>
+        <p class="muted" id="autosave-note" style="margin-top:8px;">Autosaves to this browser.</p>
+        <input type="file" id="file-input" accept="application/json" style="display:none">
+      </div>
+
+    </div>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ============================================================================
+//  STATE
+//  The landscape is a height field  y = f(x, z)  built from a list of
+//  "features", each a simple analytic primitive. This keeps the metaphor
+//  honest: a valley is a basin of attraction; a basin's rim is the
+//  activation energy needed to leave it.
+// ============================================================================
+
+const WORLD = 20;          // landscape spans [-10, 10] in x and z
+const HALF = WORLD / 2;
+
+const state = {
+  features: [],            // { id, type, x, z, ...params, label, color }
+  paths: [],               // { id, points:[{x,z}], label, color }
+  vscale: 1,               // vertical exaggeration (display only)
+  showGrid: true,
+  gridDensity: 40,
+  selection: null,         // { kind:'feature'|'path', id }
+};
+
+let idSeq = 1;
+const nid = () => idSeq++;
+
+// Default parameters per feature type. amp/depth/rim are in world height units.
+function defaultFeature(type, x, z) {
+  const base = { id: nid(), type, x, z, label: '', color: typeColor(type) };
+  if (type === 'valley') return { ...base, amp: 3.0, sigma: 2.2 };
+  if (type === 'ridge')  return { ...base, amp: 2.5, sigma: 2.0 };
+  if (type === 'saddle') return { ...base, amp: 2.5, sigma: 2.6 };
+  if (type === 'basin')  return { ...base, depth: 3.5, sigma: 1.8, rim: 1.6, radius: 3.6, rimWidth: 0.9 };
+  return base;
+}
+
+function typeColor(type) {
+  return ({
+    valley: '#5bd6c0', ridge: '#ff9e6d', basin: '#c08bff', saddle: '#ffd479',
+  })[type] || '#7aa2ff';
+}
+
+// ----- The height field -----------------------------------------------------
+function heightAt(x, z) {
+  let y = 0;
+  for (const f of state.features) {
+    const dx = x - f.x, dz = z - f.z;
+    const r2 = dx * dx + dz * dz;
+    if (f.type === 'valley') {
+      y -= f.amp * Math.exp(-r2 / (2 * f.sigma * f.sigma));
+    } else if (f.type === 'ridge') {
+      y += f.amp * Math.exp(-r2 / (2 * f.sigma * f.sigma));
+    } else if (f.type === 'saddle') {
+      const s2 = f.sigma * f.sigma;
+      y += f.amp * ((dx * dx - dz * dz) / s2) * Math.exp(-r2 / (2 * s2));
+    } else if (f.type === 'basin') {
+      // a central dip (the pull) + a ring-shaped rim (the activation barrier)
+      y -= f.depth * Math.exp(-r2 / (2 * f.sigma * f.sigma));
+      const r = Math.sqrt(r2);
+      const d = r - f.radius;
+      y += f.rim * Math.exp(-(d * d) / (2 * f.rimWidth * f.rimWidth));
+    }
+  }
+  return y;
+}
+
+// Numerical gradient (for the rolling marble).
+function gradAt(x, z) {
+  const e = 0.05;
+  const gx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e);
+  const gz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e);
+  return { gx, gz };
+}
+
+// ============================================================================
+//  THREE.JS SCENE
+// ============================================================================
+
+const wrap = document.getElementById('canvas-wrap');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0e1116');
+scene.fog = new THREE.Fog('#0e1116', 28, 60);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+camera.position.set(14, 13, 16);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+wrap.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+wrap.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.target.set(0, 0, 0);
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 1.1);
+key.position.set(12, 20, 8);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x8aa0ff, 0.4);
+rim.position.set(-10, 8, -12);
+scene.add(rim);
+
+// ----- Surface mesh ----------------------------------------------------------
+const SEG = 160; // high-res shaded surface
+const surfaceGeo = new THREE.PlaneGeometry(WORLD, WORLD, SEG, SEG);
+surfaceGeo.rotateX(-Math.PI / 2); // lie flat in XZ; height becomes +Y
+surfaceGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array((SEG + 1) * (SEG + 1) * 3), 3));
+const surfaceMat = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.85, metalness: 0.0,
+  flatShading: false, side: THREE.DoubleSide,
+});
+const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
+scene.add(surface);
+
+// Colormap: deep valleys -> teal/blue, mid -> green, peaks -> warm.
+function colorForHeight(t) {
+  // t in [0,1]
+  const stops = [
+    [0.00, [0.10, 0.16, 0.34]],
+    [0.35, [0.12, 0.42, 0.46]],
+    [0.50, [0.20, 0.50, 0.32]],
+    [0.68, [0.45, 0.55, 0.25]],
+    [0.85, [0.72, 0.52, 0.28]],
+    [1.00, [0.92, 0.86, 0.74]],
+  ];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [a, ca] = stops[i], [b, cb] = stops[i + 1];
+    if (t <= b) {
+      const k = (t - a) / (b - a);
+      return [ca[0] + (cb[0]-ca[0])*k, ca[1] + (cb[1]-ca[1])*k, ca[2] + (cb[2]-ca[2])*k];
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+// ----- Draped grid lines (the "grid covering the surface") -------------------
+const gridMat = new THREE.LineBasicMaterial({ color: 0x0a0d12, transparent: true, opacity: 0.35 });
+let gridLines = new THREE.LineSegments(new THREE.BufferGeometry(), gridMat);
+scene.add(gridLines);
+
+// ----- Feature handles (draggable markers) -----------------------------------
+const handleGroup = new THREE.Group();
+scene.add(handleGroup);
+
+// ----- Paths group ------------------------------------------------------------
+const pathGroup = new THREE.Group();
+scene.add(pathGroup);
+
+// ----- Marble -----------------------------------------------------------------
+const marble = new THREE.Mesh(
+  new THREE.SphereGeometry(0.32, 24, 16),
+  new THREE.MeshStandardMaterial({ color: 0xfff1c2, roughness: 0.3, metalness: 0.1, emissive: 0x332200 })
+);
+marble.visible = false;
+scene.add(marble);
+let marbleSim = null; // { x, z, vx, vz }
+
+// ============================================================================
+//  REBUILD HELPERS
+// ============================================================================
+
+function rebuildSurface() {
+  const pos = surfaceGeo.attributes.position;
+  const col = surfaceGeo.attributes.color;
+  let minY = Infinity, maxY = -Infinity;
+  const N = pos.count;
+  // pass 1: heights
+  for (let i = 0; i < N; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const y = heightAt(x, z) * state.vscale;
+    pos.setY(i, y);
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  // pass 2: colors
+  const span = Math.max(0.001, maxY - minY);
+  for (let i = 0; i < N; i++) {
+    const t = (pos.getY(i) - minY) / span;
+    const c = colorForHeight(t);
+    col.setXYZ(i, c[0], c[1], c[2]);
+  }
+  pos.needsUpdate = true;
+  col.needsUpdate = true;
+  surfaceGeo.computeVertexNormals();
+  rebuildGrid();
+  rebuildHandles();
+  rebuildPaths();
+}
+
+function rebuildGrid() {
+  gridLines.visible = state.showGrid;
+  if (!state.showGrid) return;
+  const G = state.gridDensity;       // cells per side
+  const S = 4;                       // sub-samples per cell (drape)
+  const lift = 0.02;
+  const verts = [];
+  const pt = (x, z) => verts.push(x, heightAt(x, z) * state.vscale + lift, z);
+  // lines parallel to X
+  for (let j = 0; j <= G; j++) {
+    const z = -HALF + (WORLD * j) / G;
+    let px = -HALF;
+    for (let i = 1; i <= G * S; i++) {
+      const x = -HALF + (WORLD * i) / (G * S);
+      pt(px, z); pt(x, z); px = x;
+    }
+  }
+  // lines parallel to Z
+  for (let j = 0; j <= G; j++) {
+    const x = -HALF + (WORLD * j) / G;
+    let pz = -HALF;
+    for (let i = 1; i <= G * S; i++) {
+      const z = -HALF + (WORLD * i) / (G * S);
+      pt(x, pz); pt(x, z); pz = z;
+    }
+  }
+  gridLines.geometry.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  gridLines.geometry = g;
+}
+
+function rebuildHandles() {
+  handleGroup.clear();
+  for (const f of state.features) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.28, 16, 12),
+      new THREE.MeshStandardMaterial({ color: f.color, emissive: 0x111111, roughness: 0.4 })
+    );
+    m.position.set(f.x, heightAt(f.x, f.z) * state.vscale + 0.25, f.z);
+    m.userData = { featureId: f.id };
+    if (state.selection && state.selection.kind === 'feature' && state.selection.id === f.id) {
+      m.scale.setScalar(1.4);
+      m.material.emissive = new THREE.Color(0x444444);
+    }
+    handleGroup.add(m);
+    if (f.label) m.add(makeLabel(f.label, 'label'));
+  }
+}
+
+function dropToSurface(x, z, lift = 0.12) {
+  return new THREE.Vector3(x, heightAt(x, z) * state.vscale + lift, z);
+}
+
+function rebuildPaths() {
+  pathGroup.clear();
+  for (const p of state.paths) {
+    if (p.points.length < 2) {
+      // still draw a marker for a lone point so it isn't invisible
+      if (p.points.length === 1) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8),
+          new THREE.MeshBasicMaterial({ color: p.color }));
+        dot.position.copy(dropToSurface(p.points[0].x, p.points[0].z, 0.2));
+        pathGroup.add(dot);
+      }
+      continue;
+    }
+    // densely sample the polyline so the tube hugs the terrain
+    const pts = [];
+    for (let i = 0; i < p.points.length - 1; i++) {
+      const a = p.points[i], b = p.points[i + 1];
+      const segLen = Math.hypot(b.x - a.x, b.z - a.z);
+      const steps = Math.max(2, Math.round(segLen * 6));
+      for (let s = 0; s < steps; s++) {
+        const k = s / steps;
+        const x = a.x + (b.x - a.x) * k;
+        const z = a.z + (b.z - a.z) * k;
+        pts.push(dropToSurface(x, z, 0.18));
+      }
+    }
+    pts.push(dropToSurface(p.points.at(-1).x, p.points.at(-1).z, 0.18));
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const selected = state.selection && state.selection.kind === 'path' && state.selection.id === p.id;
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, pts.length * 2, selected ? 0.16 : 0.11, 8, false),
+      new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.4, emissive: new THREE.Color(p.color).multiplyScalar(0.15) })
+    );
+    pathGroup.add(tube);
+    // end caps
+    const cap = (v) => {
+      const c = new THREE.Mesh(new THREE.SphereGeometry(selected ? 0.2 : 0.15, 14, 10),
+        new THREE.MeshStandardMaterial({ color: p.color }));
+      c.position.copy(v); pathGroup.add(c); return c;
+    };
+    cap(pts[0]);
+    const endCap = cap(pts.at(-1));
+    if (p.label) {
+      const mid = pts[Math.floor(pts.length / 2)];
+      const holder = new THREE.Object3D();
+      holder.position.copy(mid);
+      holder.add(makeLabel(p.label, 'label path-label'));
+      pathGroup.add(holder);
+    }
+  }
+}
+
+function makeLabel(text, cls) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  return new CSS2DObject(el);
+}
+
+// ============================================================================
+//  INTERACTION
+// ============================================================================
+
+let tool = 'orbit';
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0 math plane
+let dragging = null;       // a handle mesh being dragged
+let draftPath = null;      // path being drawn
+
+function setPointer(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function intersectSurface() {
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(surface, false)[0];
+  return hit ? { x: hit.point.x, z: hit.point.z } : null;
+}
+
+function intersectGround() {
+  raycaster.setFromCamera(pointer, camera);
+  const v = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(groundPlane, v) ? { x: v.x, z: v.z } : null;
+}
+
+function intersectHandle() {
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.intersectObjects(handleGroup.children, false)[0]?.object || null;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  setPointer(e);
+
+  if (tool === 'orbit') {
+    const h = intersectHandle();
+    if (h) { dragging = h; controls.enabled = false; select('feature', h.userData.featureId); }
+    return;
+  }
+
+  const p = intersectSurface();
+  if (!p) return;
+
+  if (tool === 'valley' || tool === 'ridge' || tool === 'basin' || tool === 'saddle') {
+    const f = defaultFeature(tool, p.x, p.z);
+    state.features.push(f);
+    rebuildSurface(); renderUI(); select('feature', f.id); persist();
+    setTool('orbit');
+  } else if (tool === 'path') {
+    if (!draftPath) {
+      draftPath = { id: nid(), points: [], label: '', color: '#7aa2ff' };
+      state.paths.push(draftPath);
+      select('path', draftPath.id);
+      setHint('Click to add points along the surface. <b>Double-click</b> or press <b>Enter</b> to finish, <b>Esc</b> to cancel.');
+    }
+    draftPath.points.push({ x: p.x, z: p.z });
+    rebuildPaths(); renderUI();
+  } else if (tool === 'marble') {
+    marbleSim = { x: p.x, z: p.z, vx: 0, vz: 0 };
+    marble.visible = true;
+    setTool('orbit');
+    setHint('The marble rolls down the gradient and settles in a basin of attraction.');
+  }
+});
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  setPointer(e);
+  const p = intersectGround();
+  if (!p) return;
+  const f = state.features.find(f => f.id === dragging.userData.featureId);
+  if (!f) return;
+  f.x = THREE.MathUtils.clamp(p.x, -HALF, HALF);
+  f.z = THREE.MathUtils.clamp(p.z, -HALF, HALF);
+  rebuildSurface(); renderEditor();
+});
+
+window.addEventListener('pointerup', () => {
+  if (dragging) { dragging = null; controls.enabled = true; persist(); }
+});
+
+renderer.domElement.addEventListener('dblclick', () => {
+  if (tool === 'path' && draftPath) finishPath();
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Enter' && draftPath) finishPath();
+  if (e.key === 'Escape') {
+    if (draftPath) { // cancel draft
+      state.paths = state.paths.filter(p => p !== draftPath);
+      draftPath = null; rebuildPaths(); renderUI(); setTool('orbit');
+    }
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection) deleteSelected();
+});
+
+function finishPath() {
+  if (draftPath && draftPath.points.length < 2) {
+    state.paths = state.paths.filter(p => p !== draftPath);
+  }
+  draftPath = null;
+  setTool('orbit'); rebuildPaths(); renderUI(); persist();
+  setHint('');
+}
+
+// ============================================================================
+//  SELECTION + EDITOR PANEL
+// ============================================================================
+
+function select(kind, id) {
+  state.selection = { kind, id };
+  rebuildHandles(); rebuildPaths(); renderUI();
+}
+function deselect() { state.selection = null; rebuildHandles(); rebuildPaths(); renderUI(); }
+
+function selectedFeature() {
+  if (state.selection?.kind === 'feature') return state.features.find(f => f.id === state.selection.id);
+  return null;
+}
+function selectedPath() {
+  if (state.selection?.kind === 'path') return state.paths.find(p => p.id === state.selection.id);
+  return null;
+}
+
+function deleteSelected() {
+  const s = state.selection; if (!s) return;
+  if (s.kind === 'feature') state.features = state.features.filter(f => f.id !== s.id);
+  else state.paths = state.paths.filter(p => p.id !== s.id);
+  state.selection = null;
+  rebuildSurface(); renderUI(); persist();
+}
+
+const editorEl = document.getElementById('editor');
+
+function slider(label, value, min, max, step, onInput, fmt = (v)=>v.toFixed(1)) {
+  const row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = `<label>${label}</label>`;
+  const input = document.createElement('input');
+  input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = value;
+  const val = document.createElement('span'); val.className = 'val'; val.textContent = fmt(value);
+  input.addEventListener('input', () => { const v = parseFloat(input.value); val.textContent = fmt(v); onInput(v); });
+  row.appendChild(input); row.appendChild(val);
+  return row;
+}
+
+function renderEditor() {
+  editorEl.innerHTML = '';
+  const f = selectedFeature();
+  const p = selectedPath();
+
+  if (f) {
+    const title = document.createElement('div');
+    title.innerHTML = `<div class="row"><label>Type</label><div style="flex:1;text-transform:capitalize">${f.type}</div></div>`;
+    editorEl.appendChild(title);
+
+    const labelRow = document.createElement('div'); labelRow.className = 'row';
+    labelRow.innerHTML = `<label>Label</label>`;
+    const txt = document.createElement('input'); txt.type = 'text'; txt.value = f.label;
+    txt.placeholder = f.type === 'basin' ? 'e.g. The cult' : 'name this feature';
+    txt.addEventListener('input', () => { f.label = txt.value; rebuildHandles(); renderList(); persist(); });
+    labelRow.appendChild(txt); editorEl.appendChild(labelRow);
+
+    const colorRow = document.createElement('div'); colorRow.className = 'row';
+    colorRow.innerHTML = `<label>Color</label>`;
+    const col = document.createElement('input'); col.type = 'color'; col.value = f.color;
+    col.addEventListener('input', () => { f.color = col.value; rebuildHandles(); renderList(); persist(); });
+    colorRow.appendChild(col); editorEl.appendChild(colorRow);
+
+    const up = () => { rebuildSurface(); persist(); };
+    if (f.type === 'valley' || f.type === 'ridge') {
+      editorEl.appendChild(slider('Strength', f.amp, 0.2, 8, 0.1, v => { f.amp = v; up(); }));
+      editorEl.appendChild(slider('Width', f.sigma, 0.5, 6, 0.1, v => { f.sigma = v; up(); }));
+    } else if (f.type === 'saddle') {
+      editorEl.appendChild(slider('Strength', f.amp, 0.2, 8, 0.1, v => { f.amp = v; up(); }));
+      editorEl.appendChild(slider('Width', f.sigma, 0.8, 6, 0.1, v => { f.sigma = v; up(); }));
+    } else if (f.type === 'basin') {
+      editorEl.appendChild(slider('Pull (depth)', f.depth, 0.5, 8, 0.1, v => { f.depth = v; up(); }));
+      editorEl.appendChild(slider('Inner width', f.sigma, 0.5, 4, 0.1, v => { f.sigma = v; up(); }));
+      editorEl.appendChild(slider('Barrier (rim)', f.rim, 0, 5, 0.1, v => { f.rim = v; up(); }));
+      editorEl.appendChild(slider('Rim radius', f.radius, 1, 7, 0.1, v => { f.radius = v; up(); }));
+      editorEl.appendChild(slider('Rim sharpness', f.rimWidth, 0.3, 3, 0.1, v => { f.rimWidth = v; up(); }));
+    }
+
+    const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = 'Delete feature';
+    del.style.marginTop = '8px';
+    del.addEventListener('click', deleteSelected);
+    editorEl.appendChild(del);
+    return;
+  }
+
+  if (p) {
+    const labelRow = document.createElement('div'); labelRow.className = 'row';
+    labelRow.innerHTML = `<label>Label</label>`;
+    const txt = document.createElement('input'); txt.type = 'text'; txt.value = p.label;
+    txt.placeholder = 'e.g. A life';
+    txt.addEventListener('input', () => { p.label = txt.value; rebuildPaths(); renderList(); persist(); });
+    labelRow.appendChild(txt); editorEl.appendChild(labelRow);
+
+    const colorRow = document.createElement('div'); colorRow.className = 'row';
+    colorRow.innerHTML = `<label>Color</label>`;
+    const col = document.createElement('input'); col.type = 'color'; col.value = p.color;
+    col.addEventListener('input', () => { p.color = col.value; rebuildPaths(); renderList(); persist(); });
+    colorRow.appendChild(col); editorEl.appendChild(colorRow);
+
+    const info = document.createElement('p'); info.className = 'muted';
+    info.textContent = `${p.points.length} points.`;
+    editorEl.appendChild(info);
+
+    const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = 'Delete path';
+    del.addEventListener('click', deleteSelected);
+    editorEl.appendChild(del);
+    return;
+  }
+
+  editorEl.innerHTML = '<div class="empty">Nothing selected. Click a handle or list item, or add a feature.</div>';
+}
+
+// ----- Lists -----------------------------------------------------------------
+const featureListEl = document.getElementById('feature-list');
+const pathListEl = document.getElementById('path-list');
+
+function renderList() {
+  featureListEl.innerHTML = '';
+  if (!state.features.length) featureListEl.innerHTML = '<div class="empty">No features yet.</div>';
+  for (const f of state.features) {
+    const item = document.createElement('div');
+    item.className = 'item' + (state.selection?.kind === 'feature' && state.selection.id === f.id ? ' selected' : '');
+    item.innerHTML = `<span class="swatch" style="background:${f.color}"></span>
+      <span class="name">${f.label || '(unlabeled)'}</span><span class="kind">${f.type}</span>`;
+    item.addEventListener('click', () => select('feature', f.id));
+    featureListEl.appendChild(item);
+  }
+  pathListEl.innerHTML = '';
+  if (!state.paths.length) pathListEl.innerHTML = '<div class="empty">No paths yet.</div>';
+  for (const p of state.paths) {
+    const item = document.createElement('div');
+    item.className = 'item' + (state.selection?.kind === 'path' && state.selection.id === p.id ? ' selected' : '');
+    item.innerHTML = `<span class="swatch" style="background:${p.color}"></span>
+      <span class="name">${p.label || '(unlabeled path)'}</span><span class="kind">${p.points.length}pt</span>`;
+    item.addEventListener('click', () => select('path', p.id));
+    pathListEl.appendChild(item);
+  }
+}
+
+function renderUI() { renderEditor(); renderList(); }
+
+// ============================================================================
+//  TOOLBAR
+// ============================================================================
+const toolsEl = document.getElementById('tools');
+function setTool(t) {
+  tool = t;
+  [...toolsEl.children].forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+  const hints = {
+    orbit: 'Drag to orbit · scroll to zoom · right-drag to pan. Drag a colored handle to move a feature.',
+    valley: 'Click the surface to place a <b>valley</b> — a dip that pulls things in.',
+    ridge: 'Click the surface to place a <b>ridge</b> — a barrier to climb.',
+    basin: 'Click to place a <b>basin</b>: a deep pull ringed by a rim. The rim is the activation energy to escape.',
+    saddle: 'Click to place a <b>saddle</b> — a mountain pass between two valleys.',
+    path: 'Click points to trace a <b>path</b> across the surface. Double-click / Enter to finish.',
+    marble: 'Click a starting point and watch the <b>marble</b> roll downhill into a basin.',
+  };
+  setHint(hints[t] || '');
+}
+toolsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tool'); if (!btn) return;
+  if (draftPath) finishPath();
+  setTool(btn.dataset.tool);
+});
+
+const hintEl = document.getElementById('hint');
+function setHint(html) { hintEl.style.display = html ? 'block' : 'none'; hintEl.innerHTML = html; }
+
+// ============================================================================
+//  DISPLAY OPTIONS
+// ============================================================================
+const bind = (id, fn, fmt) => {
+  const el = document.getElementById(id), out = document.getElementById(id + '-v');
+  el.addEventListener('input', () => { const v = parseFloat(el.value); if (out && fmt) out.textContent = fmt(v); fn(v); });
+};
+bind('opt-grid', v => { state.showGrid = !!v; rebuildGrid(); persist();
+  document.getElementById('opt-grid-v').textContent = v ? 'on' : 'off'; });
+bind('opt-density', v => { state.gridDensity = v; rebuildGrid(); persist(); }, v => String(v));
+bind('opt-vscale', v => { state.vscale = v; rebuildSurface(); persist(); }, v => v.toFixed(1));
+
+// ============================================================================
+//  SAVE / LOAD / EXPORT / PERSIST
+// ============================================================================
+const STORE_KEY = 'life-landscape:v1';
+
+function serialize() {
+  return JSON.stringify({
+    version: 1, features: state.features, paths: state.paths,
+    vscale: state.vscale, showGrid: state.showGrid, gridDensity: state.gridDensity,
+    camera: { pos: camera.position.toArray(), target: controls.target.toArray() },
+  }, null, 2);
+}
+
+function load(obj) {
+  state.features = (obj.features || []).map(f => ({ ...f }));
+  state.paths = (obj.paths || []).map(p => ({ ...p, points: p.points.map(pt => ({ ...pt })) }));
+  state.vscale = obj.vscale ?? 1;
+  state.showGrid = obj.showGrid ?? true;
+  state.gridDensity = obj.gridDensity ?? 40;
+  state.selection = null;
+  idSeq = Math.max(1, ...state.features.map(f => f.id), ...state.paths.map(p => p.id)) + 1;
+  // sync display controls
+  document.getElementById('opt-grid').value = state.showGrid ? 1 : 0;
+  document.getElementById('opt-grid-v').textContent = state.showGrid ? 'on' : 'off';
+  document.getElementById('opt-density').value = state.gridDensity;
+  document.getElementById('opt-density-v').textContent = String(state.gridDensity);
+  document.getElementById('opt-vscale').value = state.vscale;
+  document.getElementById('opt-vscale-v').textContent = state.vscale.toFixed(1);
+  if (obj.camera) {
+    camera.position.fromArray(obj.camera.pos);
+    controls.target.fromArray(obj.camera.target);
+  }
+  rebuildSurface(); renderUI();
+}
+
+let persistTimer = null;
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    try { localStorage.setItem(STORE_KEY, serialize()); } catch (e) {}
+  }, 300);
+}
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  const blob = new Blob([serialize()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'life-landscape.json';
+  a.click();
+});
+
+const fileInput = document.getElementById('file-input');
+document.getElementById('btn-load').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { try { load(JSON.parse(reader.result)); persist(); } catch (e) { alert('Could not read that file.'); } };
+  reader.readAsText(file);
+  fileInput.value = '';
+});
+
+document.getElementById('btn-png').addEventListener('click', () => {
+  renderer.render(scene, camera); // ensure fresh frame
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = 'life-landscape.png';
+  a.click();
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('Clear the whole landscape?')) return;
+  state.features = []; state.paths = []; state.selection = null;
+  rebuildSurface(); renderUI(); persist();
+});
+
+document.getElementById('btn-example').addEventListener('click', () => loadExample());
+
+// ============================================================================
+//  EXAMPLE SCENE — the metaphor, ready to explore
+// ============================================================================
+function loadExample() {
+  load({
+    vscale: 1, showGrid: true, gridDensity: 40,
+    features: [
+      { id: 1, type: 'basin',  x: -3.5, z: 2.5, depth: 4.5, sigma: 1.6, rim: 2.0, radius: 3.2, rimWidth: 0.8,
+        label: 'The cult', color: '#c08bff' },
+      { id: 2, type: 'valley', x: 4.5, z: -3.5, amp: 2.6, sigma: 2.6, label: 'A steady life', color: '#5bd6c0' },
+      { id: 3, type: 'ridge',  x: 0.5, z: -0.5, amp: 2.4, sigma: 2.2, label: 'Doubt', color: '#ff9e6d' },
+      { id: 4, type: 'valley', x: -5, z: -5, amp: 1.8, sigma: 2.0, label: 'Childhood', color: '#5bd6c0' },
+      { id: 5, type: 'saddle', x: 1.5, z: 3.5, amp: 2.0, sigma: 2.6, label: 'A choice', color: '#ffd479' },
+    ],
+    paths: [
+      { id: 6, color: '#ffd479', label: 'One way through',
+        points: [{x:-5,z:-5},{x:-3.5,z:-2},{x:-3.6,z:2.4},{x:-1,z:3},{x:2,z:1},{x:4.3,z:-3.2}] },
+    ],
+    camera: { pos: [16, 14, 17], target: [0, -0.5, 0] },
+  });
+  persist();
+  setHint('This is the metaphor: <b>The cult</b> is a basin — a deep pull ringed by a rim you must climb to leave. Drop a marble near it to feel the attractor.');
+}
+
+// ============================================================================
+//  RENDER LOOP
+// ============================================================================
+function stepMarble(dt) {
+  if (!marbleSim) { marble.visible = false; return; }
+  const sub = 4; const h = dt / sub;
+  for (let i = 0; i < sub; i++) {
+    const { gx, gz } = gradAt(marbleSim.x, marbleSim.z);
+    const friction = 1.8;
+    marbleSim.vx += (-gx - friction * marbleSim.vx) * h;
+    marbleSim.vz += (-gz - friction * marbleSim.vz) * h;
+    marbleSim.x = THREE.MathUtils.clamp(marbleSim.x + marbleSim.vx * h, -HALF, HALF);
+    marbleSim.z = THREE.MathUtils.clamp(marbleSim.z + marbleSim.vz * h, -HALF, HALF);
+  }
+  marble.position.set(marbleSim.x, heightAt(marbleSim.x, marbleSim.z) * state.vscale + 0.32, marbleSim.z);
+}
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+  stepMarble(dt);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
+}
+window.addEventListener('resize', resize);
+
+// ============================================================================
+//  BOOT
+// ============================================================================
+resize();
+const saved = localStorage.getItem(STORE_KEY);
+if (saved) {
+  try { load(JSON.parse(saved)); } catch (e) { loadExample(); }
+} else {
+  loadExample();
+}
+setTool('orbit');
+animate();
+</script>
+</body>
+</html>
