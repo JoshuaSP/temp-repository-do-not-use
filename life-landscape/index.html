@@ -384,6 +384,23 @@ let marbleSim = null; // { x, z, vx, vz }
 //  REBUILD HELPERS
 // ============================================================================
 
+// Empty a group, properly removing nested CSS2D label elements from the DOM
+// and freeing GPU resources. Group.clear() only fires 'removed' on direct
+// children, so labels nested inside meshes would otherwise leak and smear.
+function emptyGroup(group) {
+  group.traverse((obj) => {
+    if (obj.isCSS2DObject && obj.element && obj.element.parentNode) {
+      obj.element.remove();
+    }
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else obj.material.dispose();
+    }
+  });
+  group.clear();
+}
+
 function rebuildSurface() {
   const pos = surfaceGeo.attributes.position;
   const col = surfaceGeo.attributes.color;
@@ -444,7 +461,7 @@ function rebuildGrid() {
 }
 
 function rebuildHandles() {
-  handleGroup.clear();
+  emptyGroup(handleGroup);
   for (const f of state.features) {
     const m = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 16, 12),
@@ -466,7 +483,7 @@ function dropToSurface(x, z, lift = 0.12) {
 }
 
 function rebuildPaths() {
-  pathGroup.clear();
+  emptyGroup(pathGroup);
   for (const p of state.paths) {
     if (p.points.length < 2) {
       // still draw a marker for a lone point so it isn't invisible
